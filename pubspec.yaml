@@ -1,0 +1,77 @@
+name: otopark_app
+description: "A new Flutter project."
+
+publish_to: 'none'
+
+version: 1.0.0+1
+
+environment:
+  sdk: ^3.7.2
+
+dependencies:
+  flutter:
+    sdk: flutter
+  google_maps_flutter: ^2.5.0
+  http: ^1.1.0
+
+  # Konum hizmetleri
+  geolocator: ^10.0.0
+  geocoding: ^2.1.0
+  # Emülatör/cihaz algılama için
+  device_info_plus: ^9.0.2
+
+  flutter_dotenv: ^5.0.2
+  provider: ^6.0.5
+  url_launcher: ^6.1.11
+  flutter_polyline_points: ^2.0.0
+  shared_preferences: ^2.2.1
+  permission_handler: ^11.0.1
+
+  cupertino_icons: ^1.0.8
+
+#veritabanı 
+  mysql1: ^0.20.0
+
+dev_dependencies:
+  flutter_test:
+    sdk: flutter
+  flutter_lints: ^5.0.0
+  flutter_native_splash: ^2.3.5
+  flutter_launcher_icons: ^0.13.1 
+
+flutter_native_splash:
+  color: "#1E2B35"
+  image: assets/images/logo.png
+  android: true
+  ios: true
+  fullscreen: true
+
+flutter:
+  uses-material-design: true
+  assets:
+    - assets/images/logo.png
+
+
+flutter_launcher_icons:
+  android: true
+  ios: true
+  fullscreen: true
+
+  image_size: 0.65
+  image_path: "assets/images/logo.png"
+  adaptive_icon_background: "#1E2B35"
+  adaptive_icon_foreground: "assets/images/logo.png" # Ön plan resmi
+  adaptive_icon_round: true # Android'de yuvarlak ikon
+  remove_alpha_ios: true
+  min_sdk_android: 21 # Android için minimum SDK sürümü
+  android_12:
+    image: assets/images/logo.png
+    icon_background_color: "#1E2B35"
+    image_dark: assets/images/logo.png
+    icon_background_color_dark: "#1E2B35"
+  web:
+    generate: false
+  windows:
+    generate: false
+  macos:
+    generate: false
