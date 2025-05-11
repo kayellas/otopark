@@ -213,7 +213,8 @@ void _toggleFavorite(Map<String, dynamic> parking) {
     });
 
     const url =
-        'https://acikveri.bizizmir.com/api/3/action/datastore_search?resource_id=a982c5d9-931d-4a75-a61d-23127d8ddad2&limit=5';
+        'https://acikveri.bizizmir.com/api/3/action/datastore_search?resource_id=a982c5d9-931d-4a75-a61d-23127d8ddad2&limit=1000';
+
 
     try {
       final response = await http.get(Uri.parse(url));

@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'dart:async';
 import 'map_screen.dart';
+import 'admin_dashboard.dart';
 
 class SplashScreen extends StatefulWidget {
   const SplashScreen({super.key});
@@ -51,157 +52,166 @@ class _SplashScreenState extends State<SplashScreen>
       shape: const RoundedRectangleBorder(
         borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
       ),
-      builder: (context) => DraggableScrollableSheet(
-        initialChildSize: 0.6,
-        minChildSize: 0.4,
-        maxChildSize: 0.9,
-        expand: false,
-        builder: (context, scrollController) {
-          return Padding(
-            padding: EdgeInsets.only(
-              bottom: MediaQuery.of(context).viewInsets.bottom,
-              left: 20, 
-              right: 20, 
-              top: 20
-            ),
-            child: SingleChildScrollView(
-              controller: scrollController,
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Center(
-                    child: Container(
-                      width: 40,
-                      height: 5,
-                      margin: const EdgeInsets.only(bottom: 20),
-                      decoration: BoxDecoration(
-                        color: Colors.grey[300],
-                        borderRadius: BorderRadius.circular(10),
-                      ),
-                    ),
-                  ),
-                  const Text(
-                    'Yönetici Girişi',
-                    style: TextStyle(
-                      fontSize: 24,
-                      fontWeight: FontWeight.bold,
-                      color: Color(0xFF246AFB),
-                    ),
-                  ),
-                  const SizedBox(height: 20),
-                  Form(
-                    key: _formKey,
-                    child: Column(
-                      children: [
-                        // Kullanıcı adı alanı
-                        TextFormField(
-                          controller: _usernameController,
-                          decoration: InputDecoration(
-                            labelText: 'Kullanıcı Adı',
-                            prefixIcon: const Icon(Icons.person),
-                            border: OutlineInputBorder(
-                              borderRadius: BorderRadius.circular(10),
-                            ),
+      builder: (context) => StatefulBuilder(
+        builder: (context, setState) {
+          return DraggableScrollableSheet(
+            initialChildSize: 0.6,
+            minChildSize: 0.4,
+            maxChildSize: 0.9,
+            expand: false,
+            builder: (context, scrollController) {
+              return Padding(
+                padding: EdgeInsets.only(
+                  bottom: MediaQuery.of(context).viewInsets.bottom,
+                  left: 20, 
+                  right: 20, 
+                  top: 20
+                ),
+                child: SingleChildScrollView(
+                  controller: scrollController,
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Center(
+                        child: Container(
+                          width: 40,
+                          height: 5,
+                          margin: const EdgeInsets.only(bottom: 20),
+                          decoration: BoxDecoration(
+                            color: Colors.grey[300],
+                            borderRadius: BorderRadius.circular(10),
                           ),
-                          validator: (value) {
-                            if (value == null || value.isEmpty) {
-                              return 'Lütfen kullanıcı adını giriniz';
-                            }
-                            return null;
-                          },
                         ),
-                        const SizedBox(height: 15),
-                        // Şifre alanı
-                        TextFormField(
-                          controller: _passwordController,
-                          obscureText: _isObscure,
-                          decoration: InputDecoration(
-                            labelText: 'Şifre',
-                            prefixIcon: const Icon(Icons.lock),
-                            suffixIcon: IconButton(
-                              icon: Icon(
-                                _isObscure ? Icons.visibility : Icons.visibility_off,
+                      ),
+                      const Text(
+                        'Yönetici Girişi',
+                        style: TextStyle(
+                          fontSize: 24,
+                          fontWeight: FontWeight.bold,
+                          color: Color(0xFF246AFB),
+                        ),
+                      ),
+                      const SizedBox(height: 20),
+                      Form(
+                        key: _formKey,
+                        child: Column(
+                          children: [
+                            // Kullanıcı adı alanı
+                            TextFormField(
+                              controller: _usernameController,
+                              decoration: InputDecoration(
+                                labelText: 'Kullanıcı Adı',
+                                prefixIcon: const Icon(Icons.person),
+                                border: OutlineInputBorder(
+                                  borderRadius: BorderRadius.circular(10),
+                                ),
                               ),
-                              onPressed: () {
-                                setState(() {
-                                  _isObscure = !_isObscure;
-                                });
+                              validator: (value) {
+                                if (value == null || value.isEmpty) {
+                                  return 'Lütfen kullanıcı adını giriniz';
+                                }
+                                return null;
                               },
                             ),
-                            border: OutlineInputBorder(
-                              borderRadius: BorderRadius.circular(10),
-                            ),
-                          ),
-                          validator: (value) {
-                            if (value == null || value.isEmpty) {
-                              return 'Lütfen şifrenizi giriniz';
-                            }
-                            return null;
-                          },
-                        ),
-                        const SizedBox(height: 25),
-                        // Giriş butonu
-                        SizedBox(
-                          width: double.infinity,
-                          child: ElevatedButton(
-                            onPressed: () {
-                              if (_formKey.currentState!.validate()) {
-                                // Basit bir doğrulama (gerçek uygulamada veritabanı kontrolü yapılır)
-                                if (_usernameController.text == "admin" && 
-                                    _passwordController.text == "12345") {
-                                  Navigator.pop(context);
-                                  ScaffoldMessenger.of(context).showSnackBar(
-                                    const SnackBar(
-                                      content: Text('Giriş başarılı! Admin paneline yönlendiriliyorsunuz.'),
-                                      backgroundColor: Colors.green,
-                                    ),
-                                  );
-                                  // Burada admin paneline yönlendirme yapılacak
-                                  // Şimdilik sadece başarılı mesajı gösteriliyor
-                                } else {
-                                  ScaffoldMessenger.of(context).showSnackBar(
-                                    const SnackBar(
-                                      content: Text('Kullanıcı adı veya şifre hatalı!'),
-                                      backgroundColor: Colors.red,
-                                    ),
-                                  );
+                            const SizedBox(height: 15),
+                            // Şifre alanı
+                            TextFormField(
+                              controller: _passwordController,
+                              obscureText: _isObscure,
+                              decoration: InputDecoration(
+                                labelText: 'Şifre',
+                                prefixIcon: const Icon(Icons.lock),
+                                suffixIcon: IconButton(
+                                  icon: Icon(
+                                    _isObscure ? Icons.visibility : Icons.visibility_off,
+                                  ),
+                                  onPressed: () {
+                                    setState(() {
+                                      _isObscure = !_isObscure;
+                                    });
+                                  },
+                                ),
+                                border: OutlineInputBorder(
+                                  borderRadius: BorderRadius.circular(10),
+                                ),
+                              ),
+                              validator: (value) {
+                                if (value == null || value.isEmpty) {
+                                  return 'Lütfen şifrenizi giriniz';
                                 }
-                              }
-                            },
-                            style: ElevatedButton.styleFrom(
-                              backgroundColor: const Color(0xFF246AFB),
-                              foregroundColor: Colors.white,
-                              padding: const EdgeInsets.symmetric(vertical: 15),
-                              shape: RoundedRectangleBorder(
-                                borderRadius: BorderRadius.circular(10),
+                                return null;
+                              },
+                            ),
+                            const SizedBox(height: 25),
+                            // Giriş butonu
+                            SizedBox(
+                              width: double.infinity,
+                              child: ElevatedButton(
+                                onPressed: () {
+                                  if (_formKey.currentState!.validate()) {
+                                    // Basit bir doğrulama (gerçek uygulamada veritabanı kontrolü yapılır)
+                                    if (_usernameController.text == "admin" && 
+                                        _passwordController.text == "12345") {
+                                      Navigator.pop(context); // Önce modal'ı kapat
+                                      
+                                      // Admin dashboard'a yönlendir
+                                      Navigator.of(context).pushReplacement(
+                                        MaterialPageRoute(builder: (context) => const AdminDashboard()),
+                                      );
+                                      
+                                      ScaffoldMessenger.of(context).showSnackBar(
+                                        const SnackBar(
+                                          content: Text('Giriş başarılı! Admin paneline yönlendiriliyorsunuz.'),
+                                          backgroundColor: Colors.green,
+                                          duration: Duration(seconds: 2),
+                                        ),
+                                      );
+                                    } else {
+                                      ScaffoldMessenger.of(context).showSnackBar(
+                                        const SnackBar(
+                                          content: Text('Kullanıcı adı veya şifre hatalı!'),
+                                          backgroundColor: Colors.red,
+                                        ),
+                                      );
+                                    }
+                                  }
+                                },
+                                style: ElevatedButton.styleFrom(
+                                  backgroundColor: const Color(0xFF246AFB),
+                                  foregroundColor: Colors.white,
+                                  padding: const EdgeInsets.symmetric(vertical: 15),
+                                  shape: RoundedRectangleBorder(
+                                    borderRadius: BorderRadius.circular(10),
+                                  ),
+                                ),
+                                child: const Text('GİRİŞ YAP'),
                               ),
                             ),
-                            child: const Text('GİRİŞ YAP'),
-                          ),
-                        ),
-                        const SizedBox(height: 15),
-                        TextButton(
-                          onPressed: () {
-                            // Şifremi unuttum fonksiyonu
-                            ScaffoldMessenger.of(context).showSnackBar(
-                              const SnackBar(
-                                content: Text('Şifre sıfırlama bağlantısı e-posta adresinize gönderildi.'),
+                            const SizedBox(height: 15),
+                            TextButton(
+                              onPressed: () {
+                                // Şifremi unuttum fonksiyonu
+                                ScaffoldMessenger.of(context).showSnackBar(
+                                  const SnackBar(
+                                    content: Text('Şifre sıfırlama bağlantısı e-posta adresinize gönderildi.'),
+                                  ),
+                                );
+                              },
+                              child: const Text(
+                                'Şifremi Unuttum',
+                                style: TextStyle(color: Color(0xFF246AFB)),
                               ),
-                            );
-                          },
-                          child: const Text(
-                            'Şifremi Unuttum',
-                            style: TextStyle(color: Color(0xFF246AFB)),
-                          ),
+                            ),
+                          ],
                         ),
-                      ],
-                    ),
+                      ),
+                    ],
                   ),
-                ],
-              ),
-            ),
+                ),
+              );
+            },
           );
-        },
+        }
       ),
     );
   }
