@@ -301,6 +301,8 @@ void _toggleFavorite(Map<String, dynamic> parking) {
         return BitmapDescriptor.defaultMarkerWithHue(parkingTypeHues[parkingType] ?? BitmapDescriptor.hueViolet);
       case 'UCRETSIZ':
         return BitmapDescriptor.defaultMarkerWithHue(BitmapDescriptor.hueGreen);
+      case 'SERVIS':
+        return BitmapDescriptor.defaultMarkerWithHue(BitmapDescriptor.hueViolet);
       default:
         return BitmapDescriptor.defaultMarkerWithHue(parkingTypeHues[parkingType] ?? BitmapDescriptor.hueBlue);
     }
@@ -402,6 +404,8 @@ void _toggleFavorite(Map<String, dynamic> parking) {
       _markers = newMarkers;
     });
   }
+
+  
     // Bilgi satırı oluşturucu widget
   Widget _buildInfoRow(String label, String value) {
     return Padding(
@@ -430,8 +434,38 @@ void _toggleFavorite(Map<String, dynamic> parking) {
     );
   }
 
-
-  // Otopark detaylarını gösteren alt sayfa
+// Haritayı ve tüm verileri sıfırlama fonksiyonu
+  void _refreshMapAndData() {
+    // Arama kutusunu temizle
+    _searchController.clear();
+    
+    // Filtreleri sıfırla
+    setState(() {
+      _showEmptyParkingSpots = false;
+      _showFreeParking = false;
+      _show24HourParking = false;
+      _showTrafficCondition = false;
+    });
+    
+    // Haritayı başlangıç konumuna getir
+    if (_mapController != null) {
+      _mapController!.animateCamera(
+        CameraUpdate.newLatLngZoom(_izmir, 12),
+      );
+    }
+    
+    // Verileri yeniden yükle
+    _fetchAndSetParkingMarkers();
+    
+    // Bildirim göster
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(
+        content: Text('Harita ve filtreler sıfırlandı'),
+        duration: Duration(seconds: 1),
+      ),
+    );
+  }
+// Otopark detaylarını gösteren alt sayfa
 // Otopark detaylarını gösteren alt sayfa
 // Otopark detaylarını gösteren alt sayfa
 // Otopark detaylarını gösteren alt sayfa
@@ -801,20 +835,14 @@ void _showParkingDetailsBottomSheet(Map<String, dynamic> parking) {
     );
   }
 
-  @override
+@override
   Widget build(BuildContext context) {
-    return Scaffold(
+      return Scaffold(
+      extendBodyBehindAppBar: true,
       appBar: AppBar(
-        title: const Text('EgeParkGo', style: TextStyle(color: Colors.white)),
-        backgroundColor: const Color(0xFF246AFB),
-        actions: [
-          // Add this button to the AppBar
-          IconButton(
-            icon: const Icon(Icons.favorite, color: Colors.white),
-            onPressed: _showFavoritesDialog,
-            tooltip: 'Favoriler',
-          ),
-        ],
+        backgroundColor: Colors.transparent,
+        elevation: 0,
+        toolbarHeight: 0,
       ),
       body: Stack(
         children: [
@@ -850,37 +878,67 @@ void _showParkingDetailsBottomSheet(Map<String, dynamic> parking) {
               ),
             ),
           
-          // Arama kutusu
+          // Arama kutusu ve Favori ikonu yan yana
           Positioned(
             top: 10,
             left: 10,
             right: 10,
-            child: Container(
-              decoration: BoxDecoration(
-                color: Colors.white,
-                borderRadius: BorderRadius.circular(8),
-                boxShadow: [
-                  BoxShadow(
-                    color: Colors.black.withAlpha(51),
-                    blurRadius: 5,
-                    offset: const Offset(0, 2),
+            child: Row(
+              children: [
+                // Arama kutusu
+                Expanded(
+                  child: Container(
+                    decoration: BoxDecoration(
+                      color: const Color.fromARGB(198, 255, 255, 255),
+                      borderRadius: BorderRadius.circular(8),
+                      boxShadow: [
+                        BoxShadow(
+                          color: Colors.black.withAlpha(51),
+                          blurRadius: 5,
+                          offset: const Offset(0, 2),
+                        ),
+                      ],
+                    ),
+                    child: TextField(
+                      controller: _searchController,
+                      decoration: InputDecoration(
+                        hintText: 'Otopark ara...',
+                        prefixIcon: const Icon(Icons.search),
+                        suffixIcon: IconButton(
+                          icon: const Icon(Icons.clear),
+                          onPressed: () => _searchController.clear(),
+                        ),
+                        border: InputBorder.none,
+                        contentPadding: const EdgeInsets.symmetric(vertical: 15),
+                      ),
+                      onSubmitted: (_) => _searchLocation(),
+                    ),
                   ),
-                ],
-              ),
-              child: TextField(
-                controller: _searchController,
-                decoration: InputDecoration(
-                  hintText: 'Otopark ara...',
-                  prefixIcon: const Icon(Icons.search),
-                  suffixIcon: IconButton(
-                    icon: const Icon(Icons.clear),
-                    onPressed: () => _searchController.clear(),
-                  ),
-                  border: InputBorder.none,
-                  contentPadding: const EdgeInsets.symmetric(vertical: 15),
                 ),
-                onSubmitted: (_) => _searchLocation(),
-              ),
+                
+                // Favoriler butonu
+                Container(
+                  margin: const EdgeInsets.only(left: 8),
+                  width: 48,
+                  height: 48,
+                  decoration: BoxDecoration(
+                    color: const Color.fromARGB(198, 255, 255, 255),
+                    shape: BoxShape.circle,
+                    boxShadow: [
+                      BoxShadow(
+                        color: Colors.black.withAlpha(51),
+                        blurRadius: 5,
+                        offset: const Offset(0, 2),
+                      ),
+                    ],
+                  ),
+                  child: IconButton(
+                    icon: const Icon(Icons.favorite, color: Color.fromARGB(255, 255, 2, 2)),
+                    onPressed: _showFavoritesDialog,
+                    tooltip: 'Favoriler',
+                  ),
+                ),
+              ],
             ),
           ),
           
@@ -896,7 +954,7 @@ void _showParkingDetailsBottomSheet(Map<String, dynamic> parking) {
               },
               child: Container(
                 decoration: BoxDecoration(
-                  color: const Color(0xFF246AFB),
+                  color: const Color.fromARGB(255, 76, 67, 174),
                   shape: BoxShape.circle,
                   boxShadow: [
                     BoxShadow(
@@ -932,7 +990,6 @@ void _showParkingDetailsBottomSheet(Map<String, dynamic> parking) {
                   ),
                 ],
               ),
-
             ),
           ),
         ],
@@ -943,15 +1000,16 @@ void _showParkingDetailsBottomSheet(Map<String, dynamic> parking) {
         children: [
           FloatingActionButton(
             heroTag: "refreshButton",
-            backgroundColor: const Color(0xFF246AFB),
+            backgroundColor: const Color.fromARGB(255, 218, 103, 37),
             mini: true,
-            onPressed: _fetchAndSetParkingMarkers,
+            onPressed: _refreshMapAndData,
             child: const Icon(Icons.refresh, color: Colors.white),
           ),
-          const SizedBox(height: 8),
+          const SizedBox(height: 5),
           FloatingActionButton(
             heroTag: "locationButton",
             backgroundColor: const Color(0xFF246AFB),
+            mini: true,
             onPressed: () {
               if (_userLocation != null) {
                 _mapController?.animateCamera(
@@ -967,29 +1025,81 @@ void _showParkingDetailsBottomSheet(Map<String, dynamic> parking) {
       ),
     );
   }
-
   Widget _buildFilterOption(String title, bool value, Function(bool) onChanged) {
     // Zengin renk paleti
     final primaryColor = const Color(0xFF2E7D32);    // Koyu yeşil
     final secondaryColor = const Color(0xFFE3F2FD);  // Açık yeşil arka plan
     final accentColor = const Color(0xFF4CAF50);     // Orta ton yeşil
    
-   
-    return Padding(
-      padding: const EdgeInsets.symmetric(vertical: 4),
-      child: Row(
-        mainAxisAlignment: MainAxisAlignment.spaceBetween,
-        children: [
-          Text(title),
-          Switch(
-            value: value,
-            onChanged: onChanged,
-            activeColor: const Color(0xFF246AFB),
-          ),
-        ],
+  return Container(
+    padding: const EdgeInsets.symmetric(vertical: 10, horizontal: 16),
+    margin: const EdgeInsets.symmetric(vertical: 6),
+    decoration: BoxDecoration(
+      color: value ? secondaryColor : Colors.white,
+      borderRadius: BorderRadius.circular(12),
+      border: Border.all(
+        color: value ? primaryColor : Colors.grey.shade200,
+        width: 1.5,
       ),
-    );
+      boxShadow: value ? [
+        BoxShadow(
+          color: primaryColor.withOpacity(0.15),
+          blurRadius: 8,
+          offset: const Offset(0, 2),
+        )
+      ] : null,
+    ),
+    child: Row(
+      mainAxisAlignment: MainAxisAlignment.spaceBetween,
+      children: [
+        Row(
+          children: [
+            Icon(
+              _getFilterIcon(title),
+              color: value ? primaryColor : Colors.grey.shade400,
+              size: 22,
+            ),
+            const SizedBox(width: 12),
+            Text(
+              title,
+              style: TextStyle(
+                fontSize: 15,
+                fontWeight: value ? FontWeight.w600 : FontWeight.w400,
+                color: value ? primaryColor : Colors.grey.shade700,
+                letterSpacing: 0.3,
+              ),
+            ),
+          ],
+        ),
+        Switch(
+          value: value,
+          onChanged: onChanged,
+          activeColor: Colors.white,
+          activeTrackColor: accentColor,
+          inactiveThumbColor: Colors.grey.shade300,
+          inactiveTrackColor: Colors.grey.shade200,
+        ),
+      ],
+    ),
+  );
+}
+
+// Filtre başlığına göre uygun ikon seçimi
+IconData _getFilterIcon(String title) {
+  switch (title) {
+    case 'Boş Park Yerleri':
+      return Icons.local_parking;
+    case 'Ücretsiz Otoparklar':
+      return Icons.money_off;
+    case 'Trafik Durumunu Göster':
+      return Icons.traffic;
+    case '24 Saat Açık Olanlar':
+      return Icons.access_time;
+    default:
+      return Icons.filter_list;
   }
+}
+
   
   Widget _buildLegendItem(double hue, String label) {
     return Padding(
