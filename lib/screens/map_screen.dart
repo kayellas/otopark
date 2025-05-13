@@ -5,6 +5,7 @@ import 'package:http/http.dart' as http;
 import 'package:geolocator/geolocator.dart';
 import 'dart:async';
 import 'package:url_launcher/url_launcher.dart';
+import 'dart:math' show max , min;
 
 
 class MapScreen extends StatefulWidget {
@@ -23,6 +24,8 @@ class _MapScreenState extends State<MapScreen> {
   bool _showFreeParking = false;
   bool _show24HourParking = false;
   bool _showTrafficCondition = false;
+  bool _showPetrolStations = false;  
+  bool _showCarWashes = false;       
 
   // Filtre butonu pozisyonu
   Offset _filterButtonPosition = const Offset(20, 300);
@@ -37,7 +40,57 @@ class _MapScreenState extends State<MapScreen> {
   Set<Marker> _markers = {};
   
   // Tüm otopark verileri
-  List<Map<String, dynamic>> _allParkingData = [];
+   List<Map<String, dynamic>> _allParkingData = [];
+  Future<List<Map<String, dynamic>>> _fetchPlacesData(String placeType) async {
+  try {
+    final apiKey = 'AIzaSyDiTgTw4XKZYsx51Uap4dYseatMij9d0I8';
+    String type = placeType == 'petrol_ofisi' ? 'gas_station' : 'car_wash';
+    
+    // Eğer kullanıcı konumu varsa, o konumu kullan
+    double lat = _userLocation?.latitude ?? _izmir.latitude;
+    double lng = _userLocation?.longitude ?? _izmir.longitude;
+    
+    final url = 'https://maps.googleapis.com/maps/api/place/nearbysearch/json?'
+      'location=$lat,$lng'
+      '&radius=10000'  // 10 km yarıçap içinde ara
+      '&type=$type'
+      '&key=$apiKey';
+      
+    debugPrint('Fetching places data from: $url');
+    
+    final response = await http.get(Uri.parse(url));
+    
+    if (response.statusCode == 200) {
+      final data = json.decode(response.body);
+      
+      if (data['status'] == 'OK') {
+        final List results = data['results'];
+        return List<Map<String, dynamic>>.from(results.map((place) {
+          return {
+            'OTOPARK_ADI': place['name'],
+            'ENLEM': place['geometry']['location']['lat'].toString(),
+            'BOYLAM': place['geometry']['location']['lng'].toString(),
+            'ADRES': place['vicinity'] ?? 'Adres bilgisi yok',
+            'OTOPARK_TIPI': placeType == 'petrol_ofisi' ? 'PETROL OFİSİ' : 'OTO YIKAMA',
+            'PLACE_ID': place['place_id'],
+            'RATING': place['rating']?.toString() ?? 'Değerlendirme yok',
+            // 'UCRET_DURUMU': 'UCRETLI',  // Varsayılan değer
+            'CALISMA_SAATLERI': place['opening_hours']?['open_now'] == true ? 'Şu an açık' : 'Bilgi yok',
+          };
+        }));
+      } else {
+        debugPrint('Places API error: ${data['status']}');
+        return [];
+      }
+    } else {
+      debugPrint('HTTP error: ${response.statusCode}');
+      return [];
+    }
+  } catch (e) {
+    debugPrint('Places data fetch error: $e');
+    return [];
+  }
+}
     
   final List<Map<String, dynamic>> _favoriteParkingSpots = [];
     // API URL'leri
@@ -48,6 +101,9 @@ class _MapScreenState extends State<MapScreen> {
     'TARIFE': 'https://acikveri.bizizmir.com/api/3/action/datastore_search?resource_id=8dca3fb5-b7fe-4f16-91af-d8248da59f87',
     'SERVİS' : 'https://ulasav.csb.gov.tr/api/3/action/datastore_search?resource_id=8b183e98-9f93-4b88-81c5-424e08b8428f'
   };
+  
+  // Tarife bilgilerini depolamak için map
+  Map<String, Map<String, dynamic>> _tarifeBilgileri = {};
 
   bool _isFavoriteParking(Map<String, dynamic> parking) {
     final parkingId = parking['OTOPARK_ADI']?.toString() ?? '';
@@ -59,16 +115,26 @@ class _MapScreenState extends State<MapScreen> {
   StreamSubscription<Position>? _positionStreamSubscription;
 
   @override
-void _toggleFavorite(Map<String, dynamic> parking) {
-  setState(() {
-    if (_isFavoriteParking(parking)) {
-      _favoriteParkingSpots.removeWhere((favParking) => 
-        favParking['OTOPARK_ADI'] == parking['OTOPARK_ADI']);
-    } else {
-      _favoriteParkingSpots.add(parking);
-    }
-  });
-}
+  void initState() {
+    super.initState();
+    
+    _getCurrentLocation();
+    _listenToLocationChanges();
+    _fetchTarifeData().then((_) {
+      _fetchAndSetParkingMarkers(); // Önce tarife bilgileri çekilsin, sonra otoparkları yükle
+    });
+  }
+  
+  void _toggleFavorite(Map<String, dynamic> parking) {
+    setState(() {
+      if (_isFavoriteParking(parking)) {
+        _favoriteParkingSpots.removeWhere((favParking) => 
+          favParking['OTOPARK_ADI'] == parking['OTOPARK_ADI']);
+      } else {
+        _favoriteParkingSpots.add(parking);
+      }
+    });
+  }
   void _showFavoritesDialog() {
     showDialog(
       context: context,
@@ -122,15 +188,7 @@ void _toggleFavorite(Map<String, dynamic> parking) {
       ),
     );
   }
-  @override
-  void initState() {
-    super.initState();
-    
-    _getCurrentLocation();
-    _listenToLocationChanges();
-    _fetchAndSetParkingMarkers(); // İlk veriler yüklenirken çağır
-  }
-
+  
   void _listenToLocationChanges() {
     const LocationSettings locationSettings = LocationSettings(
       accuracy: LocationAccuracy.high,
@@ -215,6 +273,229 @@ void _toggleFavorite(Map<String, dynamic> parking) {
     }
   }
 
+    // Tarife bilgilerini çekme
+Future<void> _fetchTarifeData() async {
+  try {
+    final url = _apiUrls['TARIFE']!;
+    final response = await http.get(Uri.parse(url));
+    
+    if (response.statusCode == 200) {
+      final data = json.decode(response.body);
+      final List records = data['result']['records'];
+      
+      // Tarife bilgilerini işle
+      for (var record in records) {
+        final otoparkId = record['OTOPARK_ID']?.toString();
+        final otoparkAdi = record['OTOPARK_ADI']?.toString();
+        
+        if (otoparkId != null || otoparkAdi != null) {
+          // Hem ID hem de isimle eşleştirmek için iki ayrı key ile saklayalım
+          if (otoparkId != null && otoparkId.isNotEmpty) {
+            _tarifeBilgileri[otoparkId] = Map<String, dynamic>.from(record);
+          }
+          
+          if (otoparkAdi != null && otoparkAdi.isNotEmpty) {
+            _tarifeBilgileri[otoparkAdi] = Map<String, dynamic>.from(record);
+          }
+        }
+      }
+      
+      debugPrint('Tarife bilgileri yüklendi. Toplam: ${_tarifeBilgileri.length}');
+    } else {
+      debugPrint('Tarife API hatası: ${response.statusCode}');
+    }
+  } catch (e) {
+    debugPrint('Tarife verisi çekme hatası: $e');
+  }
+}
+
+  // Otopark verilerini tarife bilgileriyle eşleştirme
+void _matchParkingWithTariff(Map<String, dynamic> parking) {
+  try {
+    final parkingId = parking['OTOPARK_ID']?.toString();
+    final parkingName = parking['OTOPARK_ADI']?.toString();
+    
+    // Önce ID ile eşleşme ara
+    if (parkingId != null && _tarifeBilgileri.containsKey(parkingId)) {
+      final tarife = _tarifeBilgileri[parkingId];
+      parking['TARIFE_DETAY'] = tarife;
+      return;
+    }
+    
+    // ID ile eşleşme yoksa isim ile ara
+    if (parkingName != null && _tarifeBilgileri.containsKey(parkingName)) {
+      final tarife = _tarifeBilgileri[parkingName];
+      parking['TARIFE_DETAY'] = tarife;
+      return;
+    }
+    
+    // İsim benzerliği ara (tam eşleşme yoksa)
+    if (parkingName != null) {
+      // En iyi eşleşmeyi bulmak için puanlama sistemi
+      int bestMatchScore = 0;
+      Map<String, dynamic>? bestMatch;
+      
+      for (var entry in _tarifeBilgileri.entries) {
+        final tarifeOtoparkAdi = entry.value['OTOPARK_ADI']?.toString() ?? '';
+        
+        if (tarifeOtoparkAdi.isEmpty) continue;
+        
+        // İsim karşılaştırması (temizlenmiş metinler)
+        final cleanParkingName = _cleanNameForComparison(parkingName);
+        final cleanTarifeName = _cleanNameForComparison(tarifeOtoparkAdi);
+        
+        int score = 0;
+        
+        // Tam eşleşme - en yüksek puan
+        if (cleanParkingName == cleanTarifeName) {
+          score = 100;
+        } 
+        // Biri diğerini içeriyor mu?
+        else if (cleanParkingName.contains(cleanTarifeName) || 
+                cleanTarifeName.contains(cleanParkingName)) {
+          score = 75;
+          
+          // Uzunluk benzerliği
+          final lengthDiff = (cleanParkingName.length - cleanTarifeName.length).abs();
+          if (lengthDiff < 5) score += 10;
+          
+          // Konum veya numara benzerliği
+          if (_containsSimilarLocationOrNumber(cleanParkingName, cleanTarifeName)) {
+            score += 10;
+          }
+        }
+        // Çok benzer mi? (Levenshtein mesafesi)
+          else {
+            final distance = _calculateLevenshteinDistance(cleanParkingName, cleanTarifeName);
+            final maxLength = max(cleanParkingName.length, cleanTarifeName.length);
+            
+            if (maxLength > 0) {
+              final similarity = 1 - (distance / maxLength);
+              if (similarity > 0.7) {  // %70'ten fazla benzerlik
+                score = (similarity * 70).toInt();
+              }
+            }
+          }
+        
+        if (score > bestMatchScore) {
+          bestMatchScore = score;
+          bestMatch = entry.value;
+        }
+      }
+      
+      // Eşik değerinden yüksekse eşleştir
+      if (bestMatchScore >= 70 && bestMatch != null) {
+        parking['TARIFE_DETAY'] = bestMatch;
+        debugPrint('Matched ${parking['OTOPARK_ADI']} with ${bestMatch['OTOPARK_ADI']} (score: $bestMatchScore)');
+      }
+    }
+  } catch (e) {
+    debugPrint('Tarife eşleştirme hatası: $e');
+  }
+}
+// İsimleri karşılaştırma için temizleme
+String _cleanNameForComparison(String text) {
+  return text
+    .toLowerCase()
+    .replaceAll(RegExp(r'[^\w\s-]'), '') // Özel karakterleri kaldır
+    .replaceAll(RegExp(r'\s+'), ' ')     // Çoklu boşlukları teke indir
+    .trim();
+}
+
+// Konum veya numara benzerliğini kontrol etme
+bool _containsSimilarLocationOrNumber(String text1, String text2) {
+  // Numara eşleşmesi kontrol et
+  final numberPattern = RegExp(r'\d+');
+  final numbers1 = numberPattern.allMatches(text1).map((m) => m.group(0)).toList();
+  final numbers2 = numberPattern.allMatches(text2).map((m) => m.group(0)).toList();
+  
+  for (var num1 in numbers1) {
+    if (numbers2.contains(num1)) return true;
+  }
+  
+  // Yaygın konum veya sokak isimleri listesi
+  final locationKeywords = [
+    'cadde', 'bulvar', 'sokak', 'sk', 'mahalle', 'meydan', 'park',
+    'hastane', 'okul', 'blv', 'cad', 'mh'
+  ];
+  
+  // Her iki metinde de aynı konum anahtar kelimeleri var mı kontrol et
+  for (var keyword in locationKeywords) {
+    if (text1.contains(keyword) && text2.contains(keyword)) {
+      return true;
+    }
+  }
+  
+  return false;
+}
+
+// Levenshtein mesafesi hesaplama (metinlerin ne kadar benzer olduğunu ölçer)
+  int _calculateLevenshteinDistance(String s, String t) {
+    if (s == t) return 0;
+    if (s.isEmpty) return t.length;
+    if (t.isEmpty) return s.length;
+
+    List<int> v0 = List<int>.filled(t.length + 1, 0);
+    List<int> v1 = List<int>.filled(t.length + 1, 0);
+
+    for (int i = 0; i < t.length + 1; i++) {
+      v0[i] = i;
+    }
+
+    for (int i = 0; i < s.length; i++) {
+      v1[0] = i + 1;
+
+      for (int j = 0; j < t.length; j++) {
+        int cost = (s[i] == t[j]) ? 0 : 1;
+        v1[j + 1] = min(v1[j] + 1, min(v0[j + 1] + 1, v0[j] + cost));
+      }
+
+      for (int j = 0; j < t.length + 1; j++) {
+        v0[j] = v1[j];
+      }
+    }
+
+    return v1[t.length];
+  }
+
+// 3. Enhance the _formatTarifeInfo function to better display tariff info
+
+// Tarife alanı eklemek için yardımcı fonksiyon
+void _addTarifeField(StringBuffer buffer, String label, dynamic value) {
+  if (value != null && 
+      value.toString().isNotEmpty && 
+      value.toString().toLowerCase() != 'null' && 
+      value.toString() != '0') {
+    
+    if (buffer.isNotEmpty) {
+      buffer.write('\n');
+    }
+    
+    // TL eklemek için kontrol
+    String valueStr = value.toString();
+    if (!valueStr.contains('TL') && RegExp(r'^\d+(\.\d+)?$').hasMatch(valueStr)) {
+      valueStr = '$valueStr TL';
+    }
+    
+    buffer.write('$label: $valueStr');
+  }
+}
+
+// Bilgi alanı eklemek için yardımcı fonksiyon
+void _addInfoField(StringBuffer buffer, String label, dynamic value) {
+  if (value != null && 
+      value.toString().isNotEmpty && 
+      value.toString().toLowerCase() != 'null') {
+    
+    if (buffer.isNotEmpty) {
+      buffer.write('\n');
+    }
+    buffer.write('$label: $value');
+  }
+}
+
+
+
   // Tüm API'lerden otopark verilerini çekme
   Future<void> _fetchAndSetParkingMarkers() async {
     setState(() {
@@ -227,6 +508,9 @@ void _toggleFavorite(Map<String, dynamic> parking) {
       for (final entry in _apiUrls.entries) {
         final parkingType = entry.key;
         final url = entry.value;
+
+        // Tarife API'sini atla, onu ayrı işliyoruz
+        if (parkingType == 'TARIFE') continue;
         
         debugPrint('Fetching data from API: $parkingType');
         
@@ -236,8 +520,31 @@ void _toggleFavorite(Map<String, dynamic> parking) {
         }
       }
 
-      debugPrint('Total parking data fetched: ${_allParkingData.length}');
-      
+    // Eğer petrol istasyonları gösterilmek isteniyorsa
+    if (_showPetrolStations) {
+      final petrolData = await _fetchPlacesData('petrol_ofisi');
+      if (petrolData.isNotEmpty) {
+        _allParkingData.addAll(petrolData);
+      }
+    }
+    
+    // Eğer oto yıkamalar gösterilmek isteniyorsa
+    if (_showCarWashes) {
+      final carWashData = await _fetchPlacesData('car_wash');
+      if (carWashData.isNotEmpty) {
+        _allParkingData.addAll(carWashData);
+      }
+    }
+
+    debugPrint('Total data fetched: ${_allParkingData.length}');
+    
+    // Her otopark için tarife bilgilerini eşleştir
+    for (var parking in _allParkingData) {
+      if (parking['OTOPARK_TIPI'] != 'PETROL OFİSİ' && parking['OTOPARK_TIPI'] != 'OTO YIKAMA') {
+        _matchParkingWithTariff(parking);
+      }
+    }
+          
       // Filtreleme olmadan tüm işaretçileri ayarlama
       _applyFilters();
       
@@ -285,28 +592,26 @@ void _toggleFavorite(Map<String, dynamic> parking) {
   Future<BitmapDescriptor> _getMarkerIcon(String type, String parkingType) async {
 
 
-    // Diğer otopark türleri için mevcut kod
-    final Map<String, double> parkingTypeHues = {
-      'AÇIK OTOPARK': BitmapDescriptor.hueBlue,
-      'KAPALI OTOPARK': BitmapDescriptor.hueOrange,
-      'YOL KENARI': BitmapDescriptor.hueCyan,
-      'SERVİS': BitmapDescriptor.hueRed,
-    };
+  // Diğer otopark türleri için mevcut kod
+  final Map<String, double> parkingTypeHues = {
+    'AÇIK OTOPARK': BitmapDescriptor.hueBlue,
+    'KAPALI OTOPARK': BitmapDescriptor.hueOrange,
+    'YOL KENARI': BitmapDescriptor.hueCyan,
+    'SERVİS': BitmapDescriptor.hueYellow,
+    'PETROL OFİSİ': BitmapDescriptor.hueRed,    // Yeni eklenen
+    'OTO YIKAMA': BitmapDescriptor.hueViolet,   // Yeni eklenen
+  };
       
-    // Ücrete göre hue değerleri
-    switch (type) {
-      case 'KAPALI':
-        return BitmapDescriptor.defaultMarkerWithHue(BitmapDescriptor.hueRed);
-      case 'UCRETLI':
-        return BitmapDescriptor.defaultMarkerWithHue(parkingTypeHues[parkingType] ?? BitmapDescriptor.hueViolet);
-      case 'UCRETSIZ':
-        return BitmapDescriptor.defaultMarkerWithHue(BitmapDescriptor.hueGreen);
-      case 'SERVIS':
-        return BitmapDescriptor.defaultMarkerWithHue(BitmapDescriptor.hueViolet);
-      default:
-        return BitmapDescriptor.defaultMarkerWithHue(parkingTypeHues[parkingType] ?? BitmapDescriptor.hueBlue);
-    }
+  // Ücrete göre hue değerleri
+  switch (type) {
+    case 'KAPALI':
+      return BitmapDescriptor.defaultMarkerWithHue(BitmapDescriptor.hueRed);
+    case 'UCRETLI':
+      return BitmapDescriptor.defaultMarkerWithHue(parkingTypeHues[parkingType] ?? BitmapDescriptor.hueViolet);
+    default:
+      return BitmapDescriptor.defaultMarkerWithHue(parkingTypeHues[parkingType] ?? BitmapDescriptor.hueBlue);
   }
+}
 
   // Filtreleri uygulama
   void _applyFilters() async {
@@ -434,6 +739,24 @@ void _toggleFavorite(Map<String, dynamic> parking) {
     );
   }
 
+  // Tarife bilgisini formatlama
+// Tarife bilgisini formatlama
+String _formatTarifeInfo(Map<String, dynamic> parking) {
+  final tarife = parking['TARIFE_DETAY'];
+  if (tarife == null) {
+    return parking['TARIFE'] ?? 'Bilgi yok';
+  }
+  
+  StringBuffer formattedTarife = StringBuffer();
+  
+  _addTarifeField(formattedTarife, 'Saatlik', tarife['SAATLIK_UCRET']);
+  _addTarifeField(formattedTarife, 'Günlük', tarife['GUNLUK_UCRET']);
+  _addTarifeField(formattedTarife, 'Aylık Abonelik', tarife['AYLIK_ABONELIK']);
+  _addInfoField(formattedTarife, 'Not', tarife['UCRET_NOTU']);
+  
+  return formattedTarife.toString().isEmpty ? 'Bilgi yok' : formattedTarife.toString();
+}
+
 // Haritayı ve tüm verileri sıfırlama fonksiyonu
   void _refreshMapAndData() {
     // Arama kutusunu temizle
@@ -445,6 +768,8 @@ void _toggleFavorite(Map<String, dynamic> parking) {
       _showFreeParking = false;
       _show24HourParking = false;
       _showTrafficCondition = false;
+      _showCarWashes = false;
+      _showPetrolStations = false;
     });
     
     // Haritayı başlangıç konumuna getir
@@ -466,9 +791,6 @@ void _toggleFavorite(Map<String, dynamic> parking) {
     );
   }
 // Otopark detaylarını gösteren alt sayfa
-// Otopark detaylarını gösteren alt sayfa
-// Otopark detaylarını gösteren alt sayfa
-// Otopark detaylarını gösteren alt sayfa
 void _showParkingDetailsBottomSheet(Map<String, dynamic> parking) {
   // Otoparkın boş yer sayısını hesapla (örnek olarak - gerçek API'den gelecek)
   final capacity = int.tryParse(parking['KAPASITE']?.toString() ?? '0') ?? 0;
@@ -484,8 +806,7 @@ void _showParkingDetailsBottomSheet(Map<String, dynamic> parking) {
     ),
     builder: (context) {
       // Favorilere eklenip eklenmediğini kontrol etmek için bir değişken
-      // StatefulBuilder içinde tanımlandı
-      bool isFavorite = _isFavoriteParking(parking);
+    bool isFavorite = _isFavoriteParking(parking);
       
       return StatefulBuilder(
         builder: (BuildContext context, StateSetter setModalState) {
@@ -608,8 +929,21 @@ void _showParkingDetailsBottomSheet(Map<String, dynamic> parking) {
                       ),
                       _buildInfoRow('Ücret Durumu', parking['UCRET_DURUMU'] ?? 'Bilinmiyor'),
                       _buildInfoRow('Ücretsiz Park Süresi', parking['UCRETSIZ_PARK_SURESI'] ?? 'Bilgi yok'),
-                      _buildInfoRow('Tarife', parking['otopark_ucretleri'] ?? 'Bilgi yok'),
+                      // _buildInfoRow('Tarife', parking['otopark_ucretleri'] ?? 'Bilgi yok'),
                       
+                      // Petrol ofisleri ve oto yıkamalar için özel alanlar
+                      if (parking['OTOPARK_TIPI'] == 'PETROL OFİSİ' || parking['OTOPARK_TIPI'] == 'OTO YIKAMA') ...[
+                        // Değerlendirme puanı göster
+                        if (parking['RATING'] != null && parking['RATING'] != 'Değerlendirme yok')
+                          _buildInfoRow('Değerlendirme', '${parking['RATING']} / 5.0'),
+                        
+                        // Place ID için ayrı bir alan (geliştirici için)
+                        // if (parking['PLACE_ID'] != null)
+                        //   _buildInfoRow('Place ID', parking['PLACE_ID']),
+                      ],
+                      
+                      // _buildInfoRow('Tarife', _formatTarifeInfo(parking)),
+
                       const SizedBox(height: 24),
                       
                       // Butonlar
@@ -789,14 +1123,6 @@ void _showParkingDetailsBottomSheet(Map<String, dynamic> parking) {
             },
           ),
           _buildFilterOption(
-            'Ücretsiz Otoparklar', 
-            _showFreeParking, 
-            (value) {
-              setModalState(() => _showFreeParking = value);
-              setState(() => _showFreeParking = value);
-            },
-          ),
-          _buildFilterOption(
             '24 Saat Açık Olanlar', 
             _show24HourParking, 
             (value) {
@@ -810,16 +1136,31 @@ void _showParkingDetailsBottomSheet(Map<String, dynamic> parking) {
             (value) {
               setModalState(() => _showTrafficCondition = value);
               setState(() => _showTrafficCondition = value);
-              // Not: GoogleMapController sınıfında setTrafficEnabled metodu yok
-              // Trafik durumu GoogleMap widget'ında trafficEnabled özelliği ile kontrol edilir
             },
           ),
+                  // Yeni filtre seçenekleri
+        _buildFilterOption(
+          'Petrol Ofislerini Göster', 
+          _showPetrolStations, 
+          (value) {
+            setModalState(() => _showPetrolStations = value);
+            setState(() => _showPetrolStations = value);
+          },
+        ),
+        _buildFilterOption(
+          'Oto Yıkamaları Göster', 
+          _showCarWashes, 
+          (value) {
+            setModalState(() => _showCarWashes = value);
+            setState(() => _showCarWashes = value);
+          },
+        ),
           const SizedBox(height: 10),
           SizedBox(
             width: double.infinity,
             child: ElevatedButton(
               onPressed: () {
-                _applyFilters();
+                _fetchAndSetParkingMarkers(); // Tüm veriyi yeniden çek
                 Navigator.pop(context);
               },
               style: ElevatedButton.styleFrom(
@@ -990,6 +1331,20 @@ void _showParkingDetailsBottomSheet(Map<String, dynamic> parking) {
                   ),
                 ],
               ),
+                          child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                _buildLegendItem(BitmapDescriptor.hueBlue, 'Açık Otopark'),
+                _buildLegendItem(BitmapDescriptor.hueOrange, 'Kapalı Otopark'),
+                _buildLegendItem(BitmapDescriptor.hueCyan, 'Yol Kenarı'),
+                // Yeni lejant öğeleri
+                if (_showPetrolStations)
+                  _buildLegendItem(BitmapDescriptor.hueRed, 'Petrol Ofisi'),
+                if (_showCarWashes)
+                  _buildLegendItem(BitmapDescriptor.hueViolet, 'Oto Yıkama'),
+                ],
+              ),
             ),
           ),
         ],
@@ -1088,8 +1443,6 @@ void _showParkingDetailsBottomSheet(Map<String, dynamic> parking) {
 IconData _getFilterIcon(String title) {
   switch (title) {
     case 'Boş Park Yerleri':
-      return Icons.local_parking;
-    case 'Ücretsiz Otoparklar':
       return Icons.money_off;
     case 'Trafik Durumunu Göster':
       return Icons.traffic;
