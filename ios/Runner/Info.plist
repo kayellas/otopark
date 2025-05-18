@@ -49,5 +49,20 @@
 		<true/>
 		<key>UIViewControllerBasedStatusBarAppearance</key>
 		<false/>
+		<key>NSLocationWhenInUseUsageDescription</key>
+		<string>Bu uygulama size yakın otoparkları göstermek için konumunuza erişmek istiyor.</string>
+		<key>NSLocationAlwaysUsageDescription</key>
+		<string>Bu uygulama arka planda çalışırken de otoparkları takip edebilmek için konumunuza erişmek istiyor.</string>
+		<key>NSLocationAlwaysAndWhenInUseUsageDescription</key>
+		<string>Bu uygulama size yakın otoparkları göstermek için konumunuza erişmek istiyor.</string>
+		<key>LSApplicationQueriesSchemes</key>
+		<array>
+			<string>https</string>
+			<string>http</string>
+			<string>geo</string>
+			<string>google.navigation</string>
+		</array>
+		<key>io.flutter.embedded_views_preview</key>
+		<true/>
 	</dict>
 </plist>

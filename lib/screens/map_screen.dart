@@ -6,6 +6,8 @@ import 'package:geolocator/geolocator.dart';
 import 'dart:async';
 import 'package:url_launcher/url_launcher.dart';
 import 'dart:math' show max , min;
+import 'package:shared_preferences/shared_preferences.dart';
+import 'dart:math' show max, min, sqrt;
 
 
 class MapScreen extends StatefulWidget {
@@ -16,6 +18,7 @@ class MapScreen extends StatefulWidget {
 }
 
 class _MapScreenState extends State<MapScreen> {
+  
   GoogleMapController? _mapController;
   final TextEditingController _searchController = TextEditingController();
 
@@ -74,7 +77,6 @@ class _MapScreenState extends State<MapScreen> {
             'OTOPARK_TIPI': placeType == 'petrol_ofisi' ? 'PETROL OFİSİ' : 'OTO YIKAMA',
             'PLACE_ID': place['place_id'],
             'RATING': place['rating']?.toString() ?? 'Değerlendirme yok',
-            // 'UCRET_DURUMU': 'UCRETLI',  // Varsayılan değer
             'CALISMA_SAATLERI': place['opening_hours']?['open_now'] == true ? 'Şu an açık' : 'Bilgi yok',
           };
         }));
@@ -117,7 +119,7 @@ class _MapScreenState extends State<MapScreen> {
   @override
   void initState() {
     super.initState();
-    
+    _loadFavorites();
     _getCurrentLocation();
     _listenToLocationChanges();
     _fetchTarifeData().then((_) {
@@ -133,6 +135,7 @@ class _MapScreenState extends State<MapScreen> {
       } else {
         _favoriteParkingSpots.add(parking);
       }
+      _saveFavorites(); // Favorileri kaydet
     });
   }
   void _showFavoritesDialog() {
@@ -222,7 +225,7 @@ class _MapScreenState extends State<MapScreen> {
       if (permission == LocationPermission.denied || permission == LocationPermission.deniedForever) {
         permission = await Geolocator.requestPermission();
         if (permission == LocationPermission.denied || permission == LocationPermission.deniedForever) {
-          if (!mounted) return; // mounted kontrolü
+          if (!mounted) return;
           
           ScaffoldMessenger.of(context).showSnackBar(
             const SnackBar(content: Text('Konum izni olmadan konumunuzu gösteremiyoruz')),
@@ -234,7 +237,7 @@ class _MapScreenState extends State<MapScreen> {
       // Konum servisinin açık olup olmadığını kontrol et
       bool serviceEnabled = await Geolocator.isLocationServiceEnabled();
       if (!serviceEnabled) {
-        if (!mounted) return; // mounted kontrolü
+        if (!mounted) return; 
         
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(content: Text('Lütfen konum servisini açınız')),
@@ -252,7 +255,7 @@ class _MapScreenState extends State<MapScreen> {
       // Debug için konum bilgilerini yazdır
       debugPrint('Alınan konum: ${position.latitude}, ${position.longitude}');
 
-      if (!mounted) return; // mounted kontrolü
+      if (!mounted) return; 
 
       setState(() {
         _userLocation = LatLng(position.latitude, position.longitude);
@@ -265,7 +268,7 @@ class _MapScreenState extends State<MapScreen> {
       }
     } catch (e) {
       debugPrint('Konum alma hatası: $e');
-      if (!mounted) return; // mounted kontrolü
+      if (!mounted) return; 
       
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(content: Text('Konum alınamadı: $e')),
@@ -273,6 +276,406 @@ class _MapScreenState extends State<MapScreen> {
     }
   }
 
+// Kullanıcının konumuna yakın otoparkları bulan fonksiyon
+List<Map<String, dynamic>> _findNearbyParkingSpots(int limit) {
+  if (_userLocation == null || _allParkingData.isEmpty) {
+    return [];
+  }
+
+  // Tüm otoparkları kullanıcıya olan uzaklıklarına göre sıralayalım
+  final sortedParkingSpots = List<Map<String, dynamic>>.from(_allParkingData);
+  
+  // Her otopark için kullanıcıya olan mesafeyi hesaplayalım
+  sortedParkingSpots.forEach((parking) {
+    final lat = double.tryParse(parking['ENLEM']?.toString() ?? '') ?? 0;
+    final lng = double.tryParse(parking['BOYLAM']?.toString() ?? '') ?? 0;
+    
+    if (lat != 0 && lng != 0) {
+      // Haversine formülü ile mesafeyi hesaplamak yerine basit bir yaklaşım kullanıyoruz
+      final latDiff = (_userLocation!.latitude - lat).abs();
+      final lngDiff = (_userLocation!.longitude - lng).abs();
+      final distance = sqrt(latDiff * latDiff + lngDiff * lngDiff);
+      
+      parking['distance'] = distance;
+    } else {
+      parking['distance'] = double.infinity;
+    }
+  });
+  
+  // Mesafeye göre sırala
+  sortedParkingSpots.sort((a, b) => 
+    (a['distance'] as double).compareTo(b['distance'] as double));
+  
+  // En yakın 'limit' sayıda otoparkı döndür
+  return sortedParkingSpots.take(limit).toList();
+}
+
+// Yakındaki otoparkları gösteren bottom sheet
+// Yakındaki otoparkları gösteren bottom sheet
+void _showNearbyParkingBottomSheet() {
+  final nearbyParkingSpots = _findNearbyParkingSpots(5);
+  
+  showModalBottomSheet(
+    context: context,
+    isScrollControlled: true,
+    shape: const RoundedRectangleBorder(
+      borderRadius: BorderRadius.vertical(top: Radius.circular(16)),
+    ),
+    builder: (context) {
+      return DraggableScrollableSheet(
+        initialChildSize: 0.4,
+        minChildSize: 0.2,
+        maxChildSize: 0.6,
+        expand: false,
+        builder: (context, scrollController) {
+          return Column(
+            children: [
+              // Tutamak
+              Center(
+                child: Container(
+                  width: 40,
+                  height: 5,
+                  margin: const EdgeInsets.symmetric(vertical: 12),
+                  decoration: BoxDecoration(
+                    color: Colors.grey[300],
+                    borderRadius: BorderRadius.circular(10),
+                  ),
+                ),
+              ),
+              
+              // Başlık
+              const Padding(
+                padding: EdgeInsets.all(16.0),
+                child: Text(
+                  'Yakındaki Otoparklar',
+                  style: TextStyle(
+                    fontSize: 18,
+                    fontWeight: FontWeight.bold,
+                  ),
+                ),
+              ),
+              
+              const Divider(),
+              
+              // Otopark listesi
+              Expanded(
+                child: nearbyParkingSpots.isEmpty
+                  ? const Center(
+                      child: Text('Yakında otopark bulunamadı veya konum bilgisi alınamadı'),
+                    )
+                  : ListView.builder(
+                      controller: scrollController,
+                      itemCount: nearbyParkingSpots.length,
+                      itemBuilder: (context, index) {
+                        final parking = nearbyParkingSpots[index];
+                        return ListTile(
+                          title: Text(parking['OTOPARK_ADI'] ?? 'Bilinmeyen Otopark'),
+                          subtitle: Text(parking['OTOPARK_TIPI'] ?? 'Bilinmeyen Tip'),
+                          trailing: const Icon(Icons.arrow_forward_ios, size: 16),
+                          onTap: () {
+                            Navigator.pop(context);
+                            
+                            // Otoparkı haritada göster
+                            final lat = double.tryParse(parking['ENLEM']?.toString() ?? '') ?? 0;
+                            final lng = double.tryParse(parking['BOYLAM']?.toString() ?? '') ?? 0;
+                            
+                            if (lat != 0 && lng != 0) {
+                              _mapController?.animateCamera(
+                                CameraUpdate.newLatLngZoom(LatLng(lat, lng), 16),
+                              );
+                              
+                              // Otopark detaylarını göster ve geri dönüş fonksiyonunu gönder
+                              _showParkingDetailsBottomSheetWithBackButton(parking, nearbyParkingSpots);
+                            }
+                          },
+                        );
+                      },
+                    ),
+              ),
+            ],
+          );
+        },
+      );
+    },
+  );
+}
+// Geri dönüş butonu olan otopark detayları bottom sheet
+void _showParkingDetailsBottomSheetWithBackButton(
+    Map<String, dynamic> parking, 
+    List<Map<String, dynamic>> nearbyParkingSpots) {
+  // Otoparkın boş yer sayısını hesapla
+  final capacity = int.tryParse(parking['KAPASITE']?.toString() ?? '0') ?? 0;
+  final estimatedUsage = (capacity * 0.7).toInt(); // Tahmini kullanım
+  final emptySpaces = capacity - estimatedUsage;
+  final parkingType = parking['OTOPARK_TIPI'] ?? 'AÇIK OTOPARK';
+  
+  showModalBottomSheet(
+    context: context,
+    isScrollControlled: true,
+    shape: const RoundedRectangleBorder(
+      borderRadius: BorderRadius.vertical(top: Radius.circular(16)),
+    ),
+    builder: (context) {
+      // Favorilere eklenip eklenmediğini kontrol et
+      bool isFavorite = _isFavoriteParking(parking);
+      
+      return StatefulBuilder(
+        builder: (BuildContext context, StateSetter setModalState) {
+          return DraggableScrollableSheet(
+            initialChildSize: 0.6,
+            minChildSize: 0.4,
+            maxChildSize: 0.8,
+            expand: false,
+            builder: (context, scrollController) {
+              return SingleChildScrollView(
+                controller: scrollController,
+                child: Padding(
+                  padding: const EdgeInsets.all(16.0),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Center(
+                        child: Container(
+                          width: 40,
+                          height: 5,
+                          margin: const EdgeInsets.only(bottom: 12),
+                          decoration: BoxDecoration(
+                            color: Colors.grey[300],
+                            borderRadius: BorderRadius.circular(10),
+                          ),
+                        ),
+                      ),
+                      
+                      // Başlık ve favorileme butonu
+                      Row(
+                        mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                        children: [
+                          Expanded(
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                Text(
+                                  parking['OTOPARK_ADI'] ?? 'Bilinmeyen Otopark',
+                                  style: const TextStyle(fontSize: 20, fontWeight: FontWeight.bold),
+                                ),
+                                Text(
+                                  parkingType,
+                                  style: TextStyle(
+                                    fontSize: 14,
+                                    color: Colors.grey[600],
+                                    fontWeight: FontWeight.w500,
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ),
+                          IconButton(
+                            icon: Icon(
+                              isFavorite ? Icons.favorite : Icons.favorite_border,
+                              color: isFavorite ? Colors.red : Colors.grey,
+                            ),
+                            onPressed: () {
+                              setModalState(() {
+                                isFavorite = !isFavorite;
+                                _toggleFavorite(parking);
+                                ScaffoldMessenger.of(context).showSnackBar(
+                                  SnackBar(
+                                    content: Text(isFavorite 
+                                        ? 'Favorilere eklendi' 
+                                        : 'Favorilerden çıkarıldı'),
+                                    duration: const Duration(seconds: 1),
+                                  ),
+                                );
+                              });
+                            },
+                          ),
+                        ],
+                      ),
+                      
+                      const Divider(height: 24),
+                      
+                      // Boş yer bilgisi
+                      Container(
+                        width: double.infinity,
+                        padding: const EdgeInsets.all(12),
+                        decoration: BoxDecoration(
+                          color: emptySpaces > 0 ? Colors.green[50] : Colors.red[50],
+                          borderRadius: BorderRadius.circular(8),
+                          border: Border.all(
+                            color: emptySpaces > 0 ? Colors.green : Colors.red,
+                            width: 1,
+                          ),
+                        ),
+                        child: Column(
+                          children: [
+                            Text(
+                              emptySpaces > 0 
+                                ? '$emptySpaces Boş Yer Mevcut' 
+                                : 'Boş Yer Yok',
+                              style: TextStyle(
+                                fontWeight: FontWeight.bold,
+                                color: emptySpaces > 0 ? Colors.green[800] : Colors.red[800],
+                              ),
+                            ),
+                            Text(
+                              'Toplam Kapasite: ${parking['KAPASITE'] ?? 'Bilinmiyor'}',
+                              style: TextStyle(
+                                color: Colors.grey[800],
+                                fontSize: 13,
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                      
+                      const SizedBox(height: 16),
+                      
+                      // Otopark bilgileri
+                      _buildInfoRow('İlçe', parking['ILCE'] ?? 'Bilinmiyor'),
+                      _buildInfoRow('Adres', parking['ADRES'] ?? 'Adres bilgisi yok'),
+                      _buildInfoRow(
+                        'Çalışma Saatleri',
+                        '${parking['ACILIS_SAATI'] ?? 'Bilinmiyor'} - ${parking['KAPANIS_SAATI'] ?? 'Bilinmiyor'}',
+                      ),
+                      _buildInfoRow('Ücret Durumu', parking['UCRET_DURUMU'] ?? 'Bilinmiyor'),
+                      _buildInfoRow('Ücretsiz Park Süresi', parking['UCRETSIZ_PARK_SURESI'] ?? 'Bilgi yok'),
+                      
+                      // Petrol ofisleri ve oto yıkamalar için özel alanlar
+                      if (parking['OTOPARK_TIPI'] == 'PETROL OFİSİ' || parking['OTOPARK_TIPI'] == 'OTO YIKAMA') ...[
+                        // Değerlendirme puanı göster
+                        if (parking['RATING'] != null && parking['RATING'] != 'Değerlendirme yok')
+                          _buildInfoRow('Değerlendirme', '${parking['RATING']} / 5.0'),
+                      ],
+                    
+                      const SizedBox(height: 24),
+                      
+                      // Butonlar
+                      Row(
+                        children: [
+                          // Geri Listeye Dön butonu
+                          Expanded(
+                            flex: 1,
+                            child: ElevatedButton.icon(
+                              icon: const Icon(Icons.arrow_back),
+                              label: const Text('Listeye Dön'),
+                              style: ElevatedButton.styleFrom(
+                                backgroundColor: Colors.grey[700],
+                                foregroundColor: Colors.white,
+                                padding: const EdgeInsets.symmetric(vertical: 12),
+                              ),
+                              onPressed: () {
+                                Navigator.pop(context);
+                                // Listeyi tekrar göster
+                                _showNearbyParkingBottomSheet();
+                              },
+                            ),
+                          ),
+                          const SizedBox(width: 10),
+                          // Yol Tarifi Al butonu
+                          Expanded(
+                            flex: 1,
+                            child: ElevatedButton.icon(
+                              icon: const Icon(Icons.directions),
+                              label: const Text('Yol Tarifi'),
+                              style: ElevatedButton.styleFrom(
+                                backgroundColor: const Color(0xFF246AFB),
+                                foregroundColor: Colors.white,
+                                padding: const EdgeInsets.symmetric(vertical: 12),
+                              ),
+                              onPressed: () async {
+                                Navigator.pop(context);
+                                final lat = double.tryParse(parking['ENLEM']?.toString() ?? '') ?? 0;
+                                final lng = double.tryParse(parking['BOYLAM']?.toString() ?? '') ?? 0;
+                                
+                                if (lat != 0 && lng != 0) {
+                                  // Haritada göster
+                                  _mapController?.animateCamera(
+                                    CameraUpdate.newLatLngZoom(LatLng(lat, lng), 16),
+                                  );
+                                  
+                                  // Yol tarifi için harici uygulamayı aç
+                                  final String destination = '$lat,$lng';
+                                  final String parkingName = Uri.encodeComponent(parking['OTOPARK_ADI'] ?? 'Otopark');
+                                  
+                                  // Kullanıcı konumu varsa, onu başlangıç noktası olarak kullan
+                                  String origin = '';
+                                  if (_userLocation != null) {
+                                    origin = '&origin=${_userLocation!.latitude},${_userLocation!.longitude}';
+                                  }
+                                  
+                                  // Google Maps URL'i oluştur
+                                  final url = 'https://www.google.com/maps/dir/?api=1$origin&destination=$destination&destination_place_id=$parkingName&travelmode=driving';
+                                  
+                                  final Uri uri = Uri.parse(url);
+                                  if (await canLaunchUrl(uri)) {
+                                    await launchUrl(uri, mode: LaunchMode.externalApplication);
+                                  } else {
+                                    if (context.mounted) {
+                                      ScaffoldMessenger.of(context).showSnackBar(
+                                        const SnackBar(content: Text('Harita uygulaması açılamadı')),
+                                      );
+                                    }
+                                  }
+                                } else {
+                                  if (context.mounted) {
+                                    ScaffoldMessenger.of(context).showSnackBar(
+                                      const SnackBar(content: Text('Bu otopark için konum bilgisi bulunamadı')),
+                                    );
+                                  }
+                                }
+                              },
+                            ),
+                          ),
+                        ],
+                      ),
+                    ],
+                  ),
+                ),
+              );
+            },
+          );
+        }
+      );
+    },
+  );
+}
+// Favorileri cihaza kaydetme metodu
+Future<void> _saveFavorites() async {
+  try {
+    final prefs = await SharedPreferences.getInstance();
+    
+    // Favorileri JSON formatına dönüştür
+    final favoritesJson = _favoriteParkingSpots.map((parking) => 
+      jsonEncode(parking)).toList();
+    
+    // JSON listesini SharedPreferences'a kaydet
+    await prefs.setStringList('favorites', favoritesJson);
+    debugPrint('Favoriler kaydedildi: ${favoritesJson.length} öğe');
+  } catch (e) {
+    debugPrint('Favorileri kaydetme hatası: $e');
+  }
+}
+// Favorileri cihazdan yükleme metodu
+Future<void> _loadFavorites() async {
+  try {
+    final prefs = await SharedPreferences.getInstance();
+    
+    // SharedPreferences'dan JSON listesini al
+    final favoritesJson = prefs.getStringList('favorites') ?? [];
+    
+    // JSON'dan Map'e dönüştür
+    _favoriteParkingSpots.clear();
+    for (String jsonItem in favoritesJson) {
+      final parking = Map<String, dynamic>.from(jsonDecode(jsonItem));
+      _favoriteParkingSpots.add(parking);
+    }
+    
+    debugPrint('Favoriler yüklendi: ${_favoriteParkingSpots.length} öğe');
+    setState(() {}); // UI'ı güncelle
+  } catch (e) {
+    debugPrint('Favorileri yükleme hatası: $e');
+  }
+}
     // Tarife bilgilerini çekme
 Future<void> _fetchTarifeData() async {
   try {
@@ -289,7 +692,7 @@ Future<void> _fetchTarifeData() async {
         final otoparkAdi = record['OTOPARK_ADI']?.toString();
         
         if (otoparkId != null || otoparkAdi != null) {
-          // Hem ID hem de isimle eşleştirmek için iki ayrı key ile saklayalım
+          // Hem ID hem de isimle eşleştirmek için iki ayrı key ile sakla
           if (otoparkId != null && otoparkId.isNotEmpty) {
             _tarifeBilgileri[otoparkId] = Map<String, dynamic>.from(record);
           }
@@ -364,7 +767,6 @@ void _matchParkingWithTariff(Map<String, dynamic> parking) {
             score += 10;
           }
         }
-        // Çok benzer mi? (Levenshtein mesafesi)
           else {
             final distance = _calculateLevenshteinDistance(cleanParkingName, cleanTarifeName);
             final maxLength = max(cleanParkingName.length, cleanTarifeName.length);
@@ -402,7 +804,7 @@ String _cleanNameForComparison(String text) {
     .trim();
 }
 
-// Konum veya numara benzerliğini kontrol etme
+// Konum veya numara benzerliğini kontrol et
 bool _containsSimilarLocationOrNumber(String text1, String text2) {
   // Numara eşleşmesi kontrol et
   final numberPattern = RegExp(r'\d+');
@@ -458,7 +860,6 @@ bool _containsSimilarLocationOrNumber(String text1, String text2) {
     return v1[t.length];
   }
 
-// 3. Enhance the _formatTarifeInfo function to better display tariff info
 
 // Tarife alanı eklemek için yardımcı fonksiyon
 void _addTarifeField(StringBuffer buffer, String label, dynamic value) {
@@ -550,13 +951,13 @@ void _addInfoField(StringBuffer buffer, String label, dynamic value) {
       
     } catch (e) {
       debugPrint('Veri çekme hatası: $e');
-      if (!mounted) return; // mounted kontrolü
+      if (!mounted) return; 
       
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(content: Text('Veriler çekilirken hata oluştu: $e')),
       );
     } finally {
-      if (mounted) { // mounted kontrolü
+      if (mounted) { 
         setState(() {
           _isLoading = false;
         });
@@ -575,7 +976,7 @@ void _addInfoField(StringBuffer buffer, String label, dynamic value) {
         // Her kayda otopark tipini ekle
         return List<Map<String, dynamic>>.from(records.map((record) {
           final map = Map<String, dynamic>.from(record);
-          map['OTOPARK_TIPI'] = parkingType; // Otopark tipini ekle
+          map['OTOPARK_TIPI'] = parkingType; 
           return map;
         }));
       } else {
@@ -598,8 +999,8 @@ void _addInfoField(StringBuffer buffer, String label, dynamic value) {
     'KAPALI OTOPARK': BitmapDescriptor.hueOrange,
     'YOL KENARI': BitmapDescriptor.hueCyan,
     'SERVİS': BitmapDescriptor.hueYellow,
-    'PETROL OFİSİ': BitmapDescriptor.hueRed,    // Yeni eklenen
-    'OTO YIKAMA': BitmapDescriptor.hueViolet,   // Yeni eklenen
+    'PETROL OFİSİ': BitmapDescriptor.hueRed,   
+    'OTO YIKAMA': BitmapDescriptor.hueViolet,   
   };
       
   // Ücrete göre hue değerleri
@@ -613,7 +1014,7 @@ void _addInfoField(StringBuffer buffer, String label, dynamic value) {
   }
 }
 
-  // Filtreleri uygulama
+  // Filtreleri uygula
   void _applyFilters() async {
     debugPrint('Applying filters to ${_allParkingData.length} parking data items');
     
@@ -739,7 +1140,6 @@ void _addInfoField(StringBuffer buffer, String label, dynamic value) {
     );
   }
 
-  // Tarife bilgisini formatlama
 // Tarife bilgisini formatlama
 String _formatTarifeInfo(Map<String, dynamic> parking) {
   final tarife = parking['TARIFE_DETAY'];
@@ -936,14 +1336,8 @@ void _showParkingDetailsBottomSheet(Map<String, dynamic> parking) {
                         // Değerlendirme puanı göster
                         if (parking['RATING'] != null && parking['RATING'] != 'Değerlendirme yok')
                           _buildInfoRow('Değerlendirme', '${parking['RATING']} / 5.0'),
-                        
-                        // Place ID için ayrı bir alan (geliştirici için)
-                        // if (parking['PLACE_ID'] != null)
-                        //   _buildInfoRow('Place ID', parking['PLACE_ID']),
                       ],
-                      
-                      // _buildInfoRow('Tarife', _formatTarifeInfo(parking)),
-
+                    
                       const SizedBox(height: 24),
                       
                       // Butonlar
@@ -1138,7 +1532,6 @@ void _showParkingDetailsBottomSheet(Map<String, dynamic> parking) {
               setState(() => _showTrafficCondition = value);
             },
           ),
-                  // Yeni filtre seçenekleri
         _buildFilterOption(
           'Petrol Ofislerini Göster', 
           _showPetrolStations, 
@@ -1354,6 +1747,15 @@ void _showParkingDetailsBottomSheet(Map<String, dynamic> parking) {
         mainAxisAlignment: MainAxisAlignment.end,
         children: [
           FloatingActionButton(
+            heroTag: "nearbyButton",
+            backgroundColor: const Color(0xFF246AFB),
+            mini: true,
+            onPressed: _showNearbyParkingBottomSheet,
+            tooltip: 'Yakındaki Otoparklar',
+            child: const Icon(Icons.local_parking, color: Colors.white),
+          ),
+          const SizedBox(height: 5),
+          FloatingActionButton(
             heroTag: "refreshButton",
             backgroundColor: const Color.fromARGB(255, 218, 103, 37),
             mini: true,
@@ -1378,13 +1780,42 @@ void _showParkingDetailsBottomSheet(Map<String, dynamic> parking) {
           ),
         ],
       ),
-    );
+            
+/*       floatingActionButton: Column(
+        mainAxisAlignment: MainAxisAlignment.end,
+        children: [
+          FloatingActionButton(
+            heroTag: "refreshButton",
+            backgroundColor: const Color.fromARGB(255, 218, 103, 37),
+            mini: true,
+            onPressed: _refreshMapAndData,
+            child: const Icon(Icons.refresh, color: Colors.white),
+          ),
+          const SizedBox(height: 5),
+          FloatingActionButton(
+            heroTag: "locationButton",
+            backgroundColor: const Color(0xFF246AFB),
+            mini: true,
+            onPressed: () {
+              if (_userLocation != null) {
+                _mapController?.animateCamera(
+                  CameraUpdate.newLatLngZoom(_userLocation!, 15),
+                );
+              } else {
+                _getCurrentLocation();
+              }
+            },
+            child: const Icon(Icons.my_location, color: Colors.white),
+          ),
+        ],
+      ),*/
+    ); 
   }
   Widget _buildFilterOption(String title, bool value, Function(bool) onChanged) {
     // Zengin renk paleti
-    final primaryColor = const Color(0xFF2E7D32);    // Koyu yeşil
-    final secondaryColor = const Color(0xFFE3F2FD);  // Açık yeşil arka plan
-    final accentColor = const Color(0xFF4CAF50);     // Orta ton yeşil
+    final primaryColor = const Color(0xFF2E7D32);    
+    final secondaryColor = const Color(0xFFE3F2FD); 
+    final accentColor = const Color(0xFF4CAF50);     
    
   return Container(
     padding: const EdgeInsets.symmetric(vertical: 10, horizontal: 16),
